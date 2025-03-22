@@ -1,0 +1,3 @@
+"""
+Document Extraction Backend Application
+"""
