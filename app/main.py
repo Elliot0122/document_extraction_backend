@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import boto3
 import json
 import uuid
@@ -8,6 +9,15 @@ from botocore.exceptions import ClientError
 from . import config
 
 app = FastAPI()
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, replace with your frontend domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Initialize global variables for AWS clients
 s3 = None
