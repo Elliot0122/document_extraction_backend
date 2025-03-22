@@ -2,8 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app, init_aws_clients
 import boto3
-from moto.s3 import mock_s3
-from moto.textract import mock_textract
+from moto import mock_aws
 import os
 from app import config
 
@@ -20,7 +19,7 @@ def mock_aws(monkeypatch):
     monkeypatch.setenv("AWS_REGION", "us-west-2")
     monkeypatch.setenv("S3_BUCKET_NAME", "test-bucket")
 
-    with mock_s3(), mock_textract():
+    with mock_aws():
         # Create mock S3 bucket
         s3_client = boto3.client(
             "s3",
