@@ -10,23 +10,6 @@ class CleanupService:
         self.thread = None
         self.is_running = False
 
-    def start(self):
-        """Start the cleanup service in a background thread."""
-        if self.is_running:
-            return
-
-        self.is_running = True
-        self.thread = threading.Thread(target=self._run_cleanup_service, daemon=True)
-        self.thread.start()
-        print("Cleanup service started")
-
-    def stop(self):
-        """Stop the cleanup service."""
-        self.is_running = False
-        if self.thread:
-            self.thread.join()
-        print("Cleanup service stopped")
-
     def _run_cleanup_service(self):
         """Run cleanup service in background."""
         print("Starting cleanup service...")

@@ -66,13 +66,15 @@ class AWSService:
                 return {
                     "query": query,
                     "answer": block["Text"],
-                    "confidence": block.get("Confidence", 0)
+                    "confidence": block.get("Confidence", 0),
+                    "geometry": block.get("Geometry", {}).get("BoundingBox", {})
                 }
         
         return {
             "query": query,
             "answer": "No relevant answer found.",
-            "confidence": 0
+            "confidence": 0,
+            "geometry": None
         }
 
     def cleanup_old_files(self, hours: int = 24):
