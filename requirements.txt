@@ -1,9 +1,0 @@
-boto3
-botocore
-dotenv
-fastapi
-python-dotenv
-requests
-uvicorn
-Pillow
-python-multipart
