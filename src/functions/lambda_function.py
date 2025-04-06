@@ -1,4 +1,7 @@
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import JSONResponse
 from lib.aws_service import aws_service
+from mangum import Mangum
 import base64
 import json
 import uuid
@@ -28,70 +31,59 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': str(e)})
         }
 
+# def handle_upload(event):
+#     """Handle file upload."""
+#     try:
+        
+
+#         # Generate file ID and upload
+#         file_id = str(uuid.uuid4())
+#         response = aws_service.upload_file(file_content, file_id, file.filename)
+        
+#         return response
+        
+#     except Exception as e:
+#         return {
+#             'statusCode': 400,
+#             'body': json.dumps({'error': str(e)}),
+#             'headers': {
+#                 'Content-Type': 'application/json',
+#                 'Access-Control-Allow-Origin': '*'
+#             }
+#         }
+
 def handle_upload(event):
-    """Handle file upload."""
-    try:
-        # Parse the multipart form data
-        body = event['body']
-        if event.get('isBase64Encoded', False):
-            body = base64.b64decode(body)
-        else:
-            body = body.encode('utf-8')
-            
-        # Extract file content and metadata
-        content_type = event['headers'].get('content-type', '')
-        if 'boundary=' not in content_type:
-            raise ValueError("Invalid content type: missing boundary")
-            
-        boundary = content_type.split('boundary=')[1]
-        parts = body.split(b'--' + boundary.encode())
-        
-        file_content = None
-        filename = None
-        
-        for part in parts:
-            if b'Content-Disposition: form-data; name="file"' in part:
-                headers, content = part.split(b'\r\n\r\n', 1)
-                file_content = content.rstrip(b'\r\n')
-                
-                # Extract filename from headers
-                filename_header = [h for h in headers.split(b'\r\n') if b'filename=' in h][0]
-                filename = filename_header.split(b'filename=')[1].strip(b'"').decode()
-                break
-        
-        if not file_content or not filename:
-            raise ValueError("No file found in request")
-            
-        # Validate file size and type
-        file_size = len(file_content)
-        if file_size > 10 * 1024 * 1024:  # 10MB
-            raise ValueError("File too large")
-            
-        file_ext = os.path.splitext(filename)[1].lower()
-        if file_ext not in ['.jpg', '.jpeg', '.png', '.pdf']:
-            raise ValueError("File type not allowed")
-            
-        # Generate file ID and upload
+    """Uses FastAPI + Mangum internally to handle file upload."""
+    app = FastAPI()
+
+    ALLOWED_FILE_TYPES = [".png", ".jpg", ".jpeg", ".pdf"]
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+    @app.post("/upload")
+    async def upload(file: UploadFile = File(...)):
+        content = await file.read()
+
+        if len(content) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail="File too large")
+
+        ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in ALLOWED_FILE_TYPES:
+            raise HTTPException(status_code=400, detail="File type not allowed")
+
         file_id = str(uuid.uuid4())
-        response = aws_service.upload_file(file_content, file_id, filename)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps(response),
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
-        }
-        
+        result = aws_service.upload_file(content, file_id, file.filename)
+
+        return JSONResponse(content={"status": "success", "data": result}, status_code=200)
+
+    # Use Mangum to adapt FastAPI app to Lambda event
+    handler = Mangum(app)
+
+    try:
+        return handler(event, None)
     except Exception as e:
         return {
-            'statusCode': 400,
-            'body': json.dumps({'error': str(e)}),
-            'headers': {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            }
+            "statusCode": 500,
+            "body": f"Internal server error: {str(e)}"
         }
 
 def handle_query(event):
