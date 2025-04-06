@@ -1,0 +1,497 @@
+#!/usr/bin/env python3
+"""
+Unified engineering convenience script for the OpenAI Lambda Backend.
+
+Usage:
+    ./dev [command] [options]
+
+Commands:
+    lint        Run all linting tools (black, isort, mypy)
+    test        Run tests with optional coverage
+    build       Build the SAM application
+    invoke      Invoke the Lambda function locally
+    clean       Clean build artifacts
+    hooks       Install pre-commit hooks
+    setup       Set up the development environment
+    deploy      Deploy the SAM application
+    help        Show this help message
+"""
+
+import argparse
+import json
+import os
+import subprocess  # nosec B404
+import sys
+from pathlib import Path
+from typing import Any, List, Optional
+
+
+class DevTool:
+    """Main development tool class."""
+
+    def __init__(self) -> None:
+        """Initialize the DevTool."""
+        self.root_dir = Path(__file__).parent.absolute()
+        self.parser = self._create_parser()
+
+    def _create_parser(self) -> argparse.ArgumentParser:
+        """Create the argument parser."""
+        parser = argparse.ArgumentParser(
+            description="Unified engineering tool for the document extraction Lambda Backend",
+            usage="./dev [command] [options]",
+        )
+        subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+        # Lint command
+        lint_parser = subparsers.add_parser("lint", help="Run linting tools")
+        lint_parser.add_argument(
+            "--fix", action="store_true", help="Fix linting issues when possible"
+        )
+        lint_parser.add_argument(
+            "--check", action="store_true", help="Check only, don't modify files"
+        )
+        lint_parser.add_argument("--black", action="store_true", help="Run only black formatter")
+        lint_parser.add_argument(
+            "--isort", action="store_true", help="Run only isort import sorter"
+        )
+        lint_parser.add_argument("--mypy", action="store_true", help="Run only mypy type checker")
+        lint_parser.add_argument(
+            "--bandit", action="store_true", help="Run only bandit security analyzer"
+        )
+
+        # Test command
+        test_parser = subparsers.add_parser("test", help="Run tests")
+        test_parser.add_argument(
+            "--coverage", "-c", action="store_true", help="Generate coverage report"
+        )
+        test_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+        test_parser.add_argument("--path", nargs="?", help="Test path to run", default="")
+        test_parser.add_argument(
+            "--no-integration", action="store_true", help="Skip integration tests"
+        )
+        test_parser.add_argument(
+            "--integration-only", action="store_true", help="Run only integration tests"
+        )
+        test_parser.add_argument(
+            "--smoke-test", action="store_true", help="Run smoke tests against the deployed API"
+        )
+
+        # Build command
+        build_parser = subparsers.add_parser("build", help="Build the SAM application")
+
+        # Deploy command
+        deploy_parser = subparsers.add_parser("deploy", help="Deploy the SAM application")
+        deploy_parser.add_argument(
+            "--prod", action="store_true", help="Deploy to production environment"
+        )
+        deploy_parser.add_argument(
+            "--dev", action="store_true", help="Deploy to development environment (default)"
+        )
+        deploy_parser.add_argument("--stage", help="Deploy to a specific stage")
+
+        # Invoke command
+        invoke_parser = subparsers.add_parser("invoke", help="Invoke the Lambda function locally")
+        invoke_parser.add_argument(
+            "--event", help="Event file path", default="events/test-event.json"
+        )
+
+        # Setup command
+        setup_parser = subparsers.add_parser("setup", help="Set up the development environment")
+        setup_parser.add_argument(
+            "--no-hooks", action="store_true", help="Skip pre-commit hooks installation"
+        )
+
+        # Sync dependencies command
+        sync_parser = subparsers.add_parser(
+            "sync", help="Sync requirements.txt with pyproject.toml"
+        )
+        return parser
+
+    def run(self, args: Optional[List[str]] = None) -> Any:
+        """Run the development tool with the given arguments."""
+        parsed_args = self.parser.parse_args(args)
+
+        if not parsed_args.command or parsed_args.command == "help":
+            self.parser.print_help()
+            return 0
+
+        # Get the method name from the command
+        # Convert dashes to underscores for method names
+        command = parsed_args.command.replace("-", "_")
+        method_name = f"cmd_{command}"
+
+        if not hasattr(self, method_name):
+            print(f"Error: Unknown command '{parsed_args.command}'")
+            self.parser.print_help()
+            return 1
+
+        # Call the method
+        return getattr(self, method_name)(parsed_args)
+
+    def cmd_lint(self, args: argparse.Namespace) -> int:
+        """Run linting tools."""
+        print("Running linters...")
+
+        # Determine mode flags
+        check_flag = "--check" if args.check else ""
+
+        # Common exclude patterns for virtual environments
+        exclude_patterns = [
+            ".venv",
+            "venv",
+            ".aws-sam",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+        ]
+        " ".join(exclude_patterns)
+
+        # Check if specific linters were specified
+        specific_linters = {
+            "isort": args.isort,
+            "black": args.black,
+            "mypy": args.mypy,
+            "bandit": args.bandit,
+        }
+
+        # If any specific linter is selected, run only those
+        run_all = not any(specific_linters.values())
+
+        # Ensure we lint the dev script itself along with src/ and lib/
+        linting_targets = ["src/", "lib/", "dev", "tests/"]
+
+        # Run isort
+        if run_all or specific_linters["isort"]:
+            print("\n=== Running isort ===")
+            isort_cmd = f"uv run isort {check_flag} --skip-glob '*.venv*' --skip-glob '*venv*' {' '.join(linting_targets)}"
+            if args.fix:
+                isort_cmd = f"uv run isort --skip-glob '*.venv*' --skip-glob '*venv*' {' '.join(linting_targets)}"
+            self._run_command(isort_cmd)
+
+        # Run black
+        if run_all or specific_linters["black"]:
+            print("\n=== Running black ===")
+            black_cmd = (
+                f"uv run black {check_flag} --exclude '(\\.venv|venv)' {' '.join(linting_targets)}"
+            )
+            if args.fix:
+                black_cmd = f"uv run black --exclude '(\\.venv|venv)' {' '.join(linting_targets)}"
+            self._run_command(black_cmd)
+
+        # Run mypy
+        if run_all or specific_linters["mypy"]:
+            print("\n=== Running mypy ===")
+            self._run_command(f"uv run mypy {' '.join(linting_targets)} --ignore-missing-imports")
+
+        # Run bandit
+        if run_all or specific_linters["bandit"]:
+            print("\n=== Running bandit ===")
+            # Add a nosec comment to the dev script itself to suppress the warning
+            bandit_cmd = (
+                f"uv run bandit -r --exclude ./.venv,./venv "
+                f"--skip B602,B404 {' '.join(linting_targets)}"
+            )
+
+            # Run bandit but exclude B101 (assert_used) for test files
+            bandit_cmd = (
+                f"uv run bandit -r --exclude ./.venv,./venv "
+                f"--skip B602,B404 src/ lib/ dev && "
+                f"uv run bandit -r --exclude ./.venv,./venv "
+                f"--skip B602,B404,B101 tests/"
+            )
+
+            self._run_command(bandit_cmd)
+
+        print("\n✅ Linting completed")
+        return 0
+
+    def cmd_test(self, args: argparse.Namespace) -> int:
+        """Run tests."""
+        print("Running tests...")
+
+        # Load environment variables
+        self._load_env_vars()
+
+        # If smoke test flag is set, run smoke tests
+        if args.smoke_test:
+            print("\n=== Running smoke tests against the deployed API ===")
+            # Prepare pytest arguments
+            pytest_args = ["-m", "e2e"]
+            if args.verbose:
+                pytest_args.append("-v")
+
+            # Run smoke tests
+            smoke_test_path = os.path.join(self.root_dir, "tests", "smoke_test")
+            cmd = f"uv run pytest {smoke_test_path} {' '.join(pytest_args)}"
+            result = self._run_command(cmd)
+
+            if result == 0:
+                print("\n✅ Smoke tests passed")
+            else:
+                print("\n❌ Smoke tests failed")
+
+            return result
+
+        # If integration-only mode is set, just run the integration tests
+        if args.integration_only:
+            print("\n=== Running integration tests ===")
+            integration_test_path = os.path.join(self.root_dir, "tests", "test_integration")
+            integration_result = self._run_command(f"uv run pytest {integration_test_path} -v")
+            return integration_result
+
+        # Prepare pytest arguments
+        pytest_args = []
+        if args.verbose:
+            pytest_args.append("-v")
+        if args.coverage:
+            pytest_args.append("--cov=src --cov=lib --cov-report=term --cov-report=html")
+
+        # If a specific path is provided, just run tests on that path
+        if args.path:
+            pytest_args.append(args.path)
+            cmd = f"uv run pytest {' '.join(pytest_args)}"
+            return self._run_command(cmd)
+
+        # Otherwise, run unit tests, potentially followed by integration tests
+        regular_test_args = pytest_args.copy()
+
+        # Exclude integration tests from regular test run
+        regular_test_args.append("tests/")
+        regular_test_args.append("--ignore=tests/test_integration/")
+        regular_test_args.append("--ignore=tests/smoke_test/")
+
+        # Run regular tests
+        print("\n=== Running unit tests ===")
+        cmd = f"uv run pytest {' '.join(regular_test_args)}"
+        result = self._run_command(cmd)
+
+        # If unit tests failed, don't run integration tests
+        if result != 0:
+            print("\n❌ Unit tests failed. Skipping integration tests.")
+            return result
+
+        # Show coverage report location if coverage was enabled
+        if args.coverage and result == 0:
+            print("\nCoverage report generated in htmlcov/index.html")
+
+        return result
+
+    def cmd_build(self, args: argparse.Namespace) -> int:
+        """Build the SAM application."""
+        print("Building the SAM application...")
+
+        # Load environment variables
+        self._load_env_vars()
+
+        # Get the configured AWS region from environment, default to us-west-2 if not set
+        region = os.environ.get("AWS_REGION", "us-west-2")
+
+        # Ensure AWS_DEFAULT_REGION is also set for consistency
+        os.environ["AWS_DEFAULT_REGION"] = region
+
+        # Build the application
+        print(f"Building the SAM application for ARM64 in {region}...")
+        result = self._run_command(f"sam build --region {region} --use-container")
+
+        if result == 0:
+            print("\n✅ Build completed successfully")
+
+        return result
+
+    def cmd_invoke(self, args: argparse.Namespace) -> int:
+        """Invoke the Lambda function locally."""
+        print("Invoking Lambda function locally...")
+
+        # Load environment variables
+        self._load_env_vars()
+
+        # Ensure the SAM application is built first
+        build_result = self.cmd_build(args)
+        if build_result != 0:
+            print("\n❌ Build failed, cannot invoke function")
+            return build_result
+
+        # Create temporary environment file for SAM
+        env_vars_file = os.path.join(self.root_dir, "temp_env.json")
+
+        with open(env_vars_file, "w") as f:
+            env_vars = {
+                "ChatCompletionFunction": {
+                    "SAM_LOCAL": "true",
+                    "ENVIRONMENT": "development",
+                }
+            }
+            json.dump(env_vars, f)
+
+        try:
+            # Run the Lambda function locally
+            print(f"\nInvoking Lambda function with event: {args.event}")
+            invoke_cmd = (
+                f"sam local invoke ChatCompletionFunction"
+                f" --event {args.event}"
+                f" --env-vars {env_vars_file}"
+            )
+
+            result = self._run_command(invoke_cmd)
+
+            if result == 0:
+                print("\n✅ Function invoked successfully")
+            else:
+                print("\n❌ Function invocation failed")
+
+            return result
+
+        finally:
+            # Clean up the temporary environment file
+            if os.path.exists(env_vars_file):
+                os.remove(env_vars_file)
+
+    def cmd_clean(self, args: argparse.Namespace) -> int:
+        """Clean build artifacts."""
+        print("Cleaning build artifacts...")
+
+        # Remove SAM build artifacts
+        self._run_command("rm -rf .aws-sam", capture_output=True)
+
+        # Remove test artifacts
+        self._run_command("rm -rf .coverage htmlcov/ .pytest_cache/", capture_output=True)
+
+        # Remove Python artifacts
+        self._run_command(
+            "find . -type d -name __pycache__ -exec rm -rf {} +",
+            capture_output=True,
+            check=False,
+        )
+        self._run_command("find . -type f -name '*.pyc' -delete", capture_output=True)
+        self._run_command("find . -type f -name '*.pyo' -delete", capture_output=True)
+        self._run_command("find . -type f -name '*.pyd' -delete", capture_output=True)
+
+        print("✅ Cleaned build artifacts")
+        return 0
+
+    def cmd_hooks(self, args: argparse.Namespace) -> int:
+        """Install pre-commit hooks."""
+        print("Installing pre-commit hooks...")
+
+        # Check if pre-commit is installed
+        if not self._is_command_available("pre-commit"):
+            print("Installing pre-commit...")
+            self._run_command("uv pip install pre-commit")
+
+        # Install pre-commit hooks
+        return self._run_command("pre-commit install")
+
+    def cmd_setup(self, args: argparse.Namespace) -> int:
+        """Set up the development environment."""
+        print("Setting up development environment...")
+
+        # Create virtual environment
+        print("Creating virtual environment...")
+        self._run_command("uv venv")
+
+        # Install dependencies
+        print("Installing dependencies...")
+        try:
+            self._run_command("uv pip install -e .")
+        except subprocess.CalledProcessError:
+            print("Warning: Could not install in editable mode, trying without...")
+            self._run_command("uv pip install .")
+
+        # Install development dependencies
+        print("Installing development dependencies...")
+        try:
+            self._run_command('uv pip install -e ".[dev]"')
+        except subprocess.CalledProcessError:
+            raise Exception("Could not install dev dependencies from pyproject.toml.")
+
+        # Create .env file if it doesn't exist
+        if not os.path.exists(".env"):
+            print("Creating .env file...")
+            if os.path.exists(".env.example"):
+                self._run_command("cp .env.example .env")
+                print("Created .env file from .env.example")
+            else:
+                print("Created basic .env file")
+
+        # Install pre-commit hooks unless explicitly skipped
+        if not args.no_hooks:
+            print("\nSetting up pre-commit hooks...")
+            if not self._is_command_available("pre-commit"):
+                print("Installing pre-commit...")
+                self._run_command("uv pip install pre-commit")
+            self._run_command("uv run pre-commit install")
+
+        return 0
+
+    def cmd_deploy(self, args: argparse.Namespace) -> int:
+        """Deploy the SAM application."""
+        # Determine which stage to deploy to
+        if args.prod:
+            stage = "prod"
+        elif args.stage:
+            stage = args.stage
+        else:
+            stage = "dev"  # Default to dev if no specific stage is provided
+
+        print(f"Deploying to {stage} environment...")
+
+        # Call deploy.sh with the appropriate environment variable
+        deploy_cmd = f"STAGE={stage} ./deploy.sh"
+        result = self._run_command(deploy_cmd)
+
+        if result == 0:
+            print(f"\n✅ Successfully deployed to {stage} environment")
+        else:
+            print(f"\n❌ Deployment to {stage} environment failed")
+
+        return result
+
+    def _run_command(self, cmd: str, capture_output: bool = False, check: bool = True) -> int:
+        """Run a shell command and return the exit code."""
+        print(f"$ {cmd}")
+        try:
+            if capture_output:
+                # nosec below silences Bandit warnings about shell=True, which is intentional for this dev tool
+                subprocess.run(  # nosec B602
+                    cmd, shell=True, check=check, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                return 0
+            else:
+                # nosec below silences Bandit warnings about shell=True, which is intentional for this dev tool
+                result = subprocess.run(cmd, shell=True, check=check)  # nosec B602
+                return result.returncode
+        except subprocess.CalledProcessError as e:
+            if not check:
+                return 0
+            print(f"Command failed with exit code {e.returncode}")
+            return e.returncode
+
+    def _is_command_available(self, cmd: str) -> bool:
+        """Check if a command is available."""
+        try:
+            # nosec below silences Bandit warnings about shell=True, which is intentional for this dev tool
+            subprocess.run(  # nosec B602
+                f"which {cmd}",
+                shell=True,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+
+    def _load_env_vars(self) -> None:
+        """Load environment variables from .env file."""
+        env_path = os.path.join(self.root_dir, ".env")
+        if os.path.exists(env_path):
+            with open(env_path, "r") as f:
+                for line in f:
+                    if line.strip() and not line.startswith("#"):
+                        key, value = line.strip().split("=", 1)
+                        os.environ[key] = value
+
+
+if __name__ == "__main__":
+    tool = DevTool()
+    sys.exit(tool.run())
