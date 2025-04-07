@@ -1,8 +1,9 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse
+from lib.secrets import get_openai_api_key
+from lib.openai_client import OpenAIClient
 from lib.aws_service import aws_service
 from mangum import Mangum
-import base64
 import json
 import uuid
 import os
@@ -102,8 +103,25 @@ def handle_query(event):
         # Get file from S3
         file_content = aws_service.get_file(file_id)
         
-        # Analyze the document
-        analysis_result = aws_service.analyze_document(file_content, user_query)
+        # Get OpenAI API key from Secrets Manager
+        try:
+            openai_api_key = get_openai_api_key()
+        except Exception as e:
+            # For local testing, try to get from environment directly
+            openai_api_key_env = os.environ.get("OPENAI_API_KEY")
+            if not openai_api_key_env:
+                raise ValueError(
+                    "OpenAI API key not found. Please set OPENAI_API_KEY environment variable."
+                )
+            openai_api_key = openai_api_key_env
+        # Initialize OpenAI client with the API key
+        client = OpenAIClient(api_key=openai_api_key)
+        
+        # Generate a concise question using OpenAI
+        question = client.generate_tick_marking_question(user_query)
+        
+        # Analyze the document with the concise question
+        analysis_result = aws_service.analyze_document(file_content, question)
         
         # Combine analysis result with the image URL
         response = {
@@ -126,6 +144,15 @@ def handle_query(event):
         return {
             'statusCode': 404,
             'body': json.dumps({'error': 'File not found'}),
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            }
+        }
+    except ValueError as e:
+        return {
+            'statusCode': 400,
+            'body': json.dumps({'error': str(e)}),
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'

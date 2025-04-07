@@ -7,7 +7,8 @@ dependencies = [
     "boto3>=1.28.65",
     "fastapi>=0.105.0",
     "mangum>=0.18.0",
-    "python-multipart>=0.0.5"
+    "python-multipart>=0.0.5",
+    "openai>=1.12.0"
 ]
 
 [build-system]

@@ -17,6 +17,11 @@ Parameters:
     Default: doc-extract-test
     Description: S3 bucket for storing documents
 
+  OpenAIApiKeySecretName:
+    Type: String
+    Default: /document-extraction/dev/openai-api-key
+    Description: Name of the secret in AWS Secrets Manager containing the OpenAI API key
+
 Globals:
   Function:
     Timeout: 30
@@ -66,6 +71,10 @@ Resources:
                   - textract:StartDocumentAnalysis
                   - textract:StartDocumentTextDetection
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${OpenAIApiKeySecretName}-*'
 
   # API Gateway
   ApiGateway:
@@ -85,6 +94,7 @@ Resources:
       Environment:
         Variables:
           S3_BUCKET: !Ref S3Bucket
+          OPENAI_API_KEY_SECRET_NAME: !Ref OpenAIApiKeySecretName
       Events:
         UploadEvent:
           Type: Api
