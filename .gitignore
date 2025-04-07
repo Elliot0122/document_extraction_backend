@@ -76,3 +76,5 @@ site/
 # Misc
 .DS_Store
 Thumbs.db
+
+build.toml

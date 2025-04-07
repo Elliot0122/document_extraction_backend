@@ -5,8 +5,8 @@ description = "Backend service for document extraction using AWS services"
 requires-python = ">=3.9"
 dependencies = [
     "boto3>=1.28.65",
-    "Pillow>=9.0.0",
-    "fastapi>=0.68.0",
+    "fastapi>=0.105.0",
+    "mangum>=0.18.0",
     "python-multipart>=0.0.5"
 ]
 

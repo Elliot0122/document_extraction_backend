@@ -67,6 +67,14 @@ Resources:
                   - textract:StartDocumentTextDetection
                 Resource: '*'
 
+  # API Gateway
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref StageName
+      BinaryMediaTypes:
+        - multipart/form-data
+
   # Document Extraction Lambda Function
   DocumentExtractionFunction:
     Type: AWS::Serverless::Function
@@ -94,18 +102,6 @@ Resources:
       DockerTag: python3.9-arm64
       DockerContext: ./
       Dockerfile: Dockerfile
-
-  # API Gateway
-  ApiGateway:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: !Ref StageName
-      Cors:
-        AllowMethods: "'GET,POST,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'*'"
-      BinaryMediaTypes:
-          - multipart/form-data
 
 Outputs:
   ApiEndpoint:

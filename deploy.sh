@@ -57,7 +57,7 @@ AWS_REGION=$REGION AWS_DEFAULT_REGION=$REGION sam deploy \
   --region ${REGION} \
   --no-fail-on-empty-changeset \
   --s3-bucket ${S3_BUCKET} \
-  --resolve-image-repos
+  --resolve-image-repos \
 
 # Get the API endpoint URL
 API_URL=$(AWS_REGION=$REGION aws cloudformation describe-stacks \

@@ -10,47 +10,49 @@ import os
 def lambda_handler(event, context):
     """Handle API Gateway events for document processing."""
     try:
-        # Parse the HTTP method and path
         http_method = event['httpMethod']
         path = event['path']
-        
-        # Handle different endpoints
-        if path == '/upload' and http_method == 'POST':
-            return handle_upload(event)
-        elif path == '/query' and http_method == 'POST':
-            return handle_query(event)
-        else:
+
+        # Define common CORS headers
+        cors_headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Access-Control-Allow-Methods": "OPTIONS,POST"
+        }
+
+        # Handle CORS preflight request
+        if http_method == 'OPTIONS':
             return {
+                'statusCode': 200,
+                'headers': cors_headers,
+                'body': json.dumps({'message': 'CORS preflight'})
+            }
+
+        # Handle actual requests
+        if path == '/upload' and http_method == 'POST':
+            response = handle_upload(event)
+        elif path == '/query' and http_method == 'POST':
+            response = handle_query(event)
+        else:
+            response = {
                 'statusCode': 404,
                 'body': json.dumps({'error': 'Not found'})
             }
-            
+
+        # Add CORS headers to the response if not already included
+        if 'headers' not in response:
+            response['headers'] = cors_headers
+        else:
+            response['headers'].update(cors_headers)
+
+        return response
+
     except Exception as e:
         return {
             'statusCode': 500,
+            'headers': cors_headers,
             'body': json.dumps({'error': str(e)})
         }
-
-# def handle_upload(event):
-#     """Handle file upload."""
-#     try:
-        
-
-#         # Generate file ID and upload
-#         file_id = str(uuid.uuid4())
-#         response = aws_service.upload_file(file_content, file_id, file.filename)
-        
-#         return response
-        
-#     except Exception as e:
-#         return {
-#             'statusCode': 400,
-#             'body': json.dumps({'error': str(e)}),
-#             'headers': {
-#                 'Content-Type': 'application/json',
-#                 'Access-Control-Allow-Origin': '*'
-#             }
-#         }
 
 def handle_upload(event):
     """Uses FastAPI + Mangum internally to handle file upload."""
