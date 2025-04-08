@@ -95,45 +95,39 @@ def handle_query(event):
         # Parse the request body
         body = json.loads(event['body'])
         file_id = body.get('file_id')
-        user_query = body.get('user_query')
+        user_queries = body.get('user_queries', [])
         
-        if not file_id or not user_query:
+        if not file_id or not user_queries:
             raise ValueError("Missing required parameters")
+            
+        if not isinstance(user_queries, list):
+            raise ValueError("user_queries must be a list")
             
         # Get file from S3
         file_content = aws_service.get_file(file_id)
         
         # Get OpenAI API key from Secrets Manager
-        try:
-            openai_api_key = get_openai_api_key()
-        except Exception as e:
-            # For local testing, try to get from environment directly
-            openai_api_key_env = os.environ.get("OPENAI_API_KEY")
-            if not openai_api_key_env:
-                raise ValueError(
-                    "OpenAI API key not found. Please set OPENAI_API_KEY environment variable."
-                )
-            openai_api_key = openai_api_key_env
+        api_key = get_openai_api_key()
+        
         # Initialize OpenAI client with the API key
-        client = OpenAIClient(api_key=openai_api_key)
+        client = OpenAIClient(api_key=api_key)
         
-        # Generate a concise question using OpenAI
-        question = client.generate_tick_marking_question(user_query)
+        # Process all queries
+        questions = []
+        for user_query in user_queries:
+            # Generate a concise question using OpenAI
+            questions.append(client.generate_tick_marking_question(user_query))
+            
+            # Analyze the document with the concise question
+        analysis_result = aws_service.analyze_document(file_content, questions)
         
-        # Analyze the document with the concise question
-        analysis_result = aws_service.analyze_document(file_content, question)
-        
-        # Combine analysis result with the image URL
-        response = {
-            "query": analysis_result["query"],
-            "answer": analysis_result["answer"],
-            "confidence": analysis_result["confidence"],
-            "geometry": analysis_result["geometry"]
-        }
-        
+        # Return all results
         return {
             'statusCode': 200,
-            'body': json.dumps(response),
+            'body': json.dumps({
+                "file_id": file_id,
+                "results": analysis_result
+            }),
             'headers': {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
